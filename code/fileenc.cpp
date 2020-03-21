@@ -69,7 +69,8 @@ int fileenc_hash_derived_key(void *hash, void *secret, size_t secretlen, void *s
 typedef struct _fileenc_readbuf
 {
   CTR<AES256> *read_cipher;
-  BLAKE2s *read_mac;
+  BLAKE2s *inner_mac;
+  BLAKE2s *outer_mac;
   FIL read_file;
   uint8_t  read_buf[FILEENC_READBUF_SIZE];
   uint16_t read_filled;
@@ -89,8 +90,8 @@ int fileenc_base64_readdata(void *v)
     UINT br;
     FRESULT res = f_read(&fr->read_file,fr->read_buf,FILEENC_READBUF_SIZE,&br);
     if ((res != FR_OK) || (br == 0)) return -1;
-    fr->read_mac->update(fr->read_buf, br);
     fr->read_cipher->encrypt(fr->read_buf, fr->read_buf, br);
+    fr->inner_mac->update(fr->read_buf, br);
     fr->read_filled = br;
     fr->read_curpos = 0;
     if ((f_tell(&fr->read_file)-fr->read_progress) >= FILEENC_DISPLAY_INCREMENT)
@@ -161,16 +162,24 @@ void fileenc_encrypt_state(fileenc_state *fs)
   {
     uint8_t secret[KEYMANAGER_MAX_SECRET_LEN];
     uint8_t hash[KEYMANAGER_HASHLEN];
-    uint8_t mac[KEYMANAGER_HASHLEN];
+    hmac_inner_outer hic;
     int secretlen;
     if (keymanager_compute_secret(secret, &secretlen))
     {
+      CTR<AES256> read_cipher;
+      BLAKE2s inner_mac;
+      BLAKE2s outer_mac;
+
       memset((void *)&fs->fth,'\000',sizeof(fs->fth));
       randomness_get_whitened_bits(fs->fth.salt1, sizeof(fs->fth.salt1));
       randomness_get_whitened_bits(fs->fth.iv1, sizeof(fs->fth.iv1));
       randomness_get_whitened_bits(fs->fth.salt2, sizeof(fs->fth.salt2));
       randomness_get_whitened_bits(fs->fth.iv2, sizeof(fs->fth.iv2));
-  
+
+      fs->read_cipher = &read_cipher;
+      fs->inner_mac = &inner_mac;
+      fs->outer_mac = &outer_mac;
+
       fileenc_hash_derived_key((void *)hash, (void *)secret, secretlen, (void *)fs->fth.salt1, sizeof(fs->fth.salt1));
       fs->fth.fhpu.fhp.id   =         FILEENC_EXPORT_ID;
       fs->fth.fhpu.fhp.entry_type =   current_key_private.entry_type;
@@ -179,29 +188,25 @@ void fileenc_encrypt_state(fileenc_state *fs)
       fs->fth.fhpu.fhp.totallen =     sizeof(fs->fth.fhpu);
       fs->fth.fhpu.fhp.file_length =  f_size(&fs->read_file);
       strcpy_n(fs->fth.fhpu.fhp.filename, fileenc_filename(filename_plaintext), sizeof(fs->fth.fhpu.fhp.filename)-1);
-      fs->fth.fhpu.fhp.crc16 = calc_crc16((uint8_t *)&fs->fth.fhpu.fhp, sizeof(fs->fth.fhpu.fhp)); 
       aes256_memcrypt(1, (void *)hash, (void *)fs->fth.iv1, (void *)&fs->fth.fhpu, sizeof(fs->fth.fhpu));
+      hmac_compute_keys(*fs->inner_mac, *fs->outer_mac, (const uint8_t *)hash);
+      fs->inner_mac->update((const uint8_t *) &fs->fth.fhpu, sizeof(fs->fth.fhpu));
+      hmac_compute_inner_outer_hash(*fs->inner_mac, *fs->outer_mac, &fs->fth.hmac_first_block);
       file_write_block(&fs->write_file, "PARANOIABOX-FILEHEADER", (void *)&fs->fth, sizeof(fs->fth));
-      fileenc_hash_derived_key((void *)hash, (void *)secret, secretlen, (void *)fs->fth.salt2, sizeof(fs->fth.salt2));
 
+      fileenc_hash_derived_key((void *)hash, (void *)secret, secretlen, (void *)fs->fth.salt2, sizeof(fs->fth.salt2));
       file_write_header(&fs->write_file,"PARANOIABOX-PAYLOAD",0);
-      CTR<AES256> cipher;
-      BLAKE2s blake2s;
-      fs->read_cipher = &cipher;
-      fs->read_mac = &blake2s;
       fs->read_filled = fs->read_curpos = 0;
       fs->write_curpos = 0;
       fs->read_progress = 0;
-      cipher.setKey((const uint8_t *)hash, cipher.keySize());
-      cipher.setIV((const uint8_t *)fs->fth.iv2, cipher.ivSize());
-      blake2s.reset((const uint8_t *)hash, sizeof(hash));
+      fs->read_cipher->setKey((const uint8_t *)hash, fs->read_cipher->keySize());
+      fs->read_cipher->setIV((const uint8_t *)fs->fth.iv2, fs->read_cipher->ivSize());
+      hmac_compute_keys(*fs->inner_mac, *fs->outer_mac, (const uint8_t *)hash);
       base64_encode(fileenc_base64_readdata,(void *)fs,  fileenc_base64_writedata, (void *)fs);
       fileenc_base64_writedata(-1, (void *)fs); 
+      hmac_compute_inner_outer_hash(*fs->inner_mac, *fs->outer_mac, &hic);
       file_write_header(&fs->write_file,"PARANOIABOX-PAYLOAD",1);
-
-      blake2s.finalize(mac, sizeof(mac));
-      file_write_block(&fs->write_file, "PARANOIABOX-ENDBLOCK", (void *)mac, sizeof(mac));
-      
+      file_write_block(&fs->write_file, "PARANOIABOX-ENDBLOCK", (void *)&hic, sizeof(hic));      
     } else file_report_error("Bad secret key");
   }  
   f_close(&fs->write_file);
@@ -233,8 +238,9 @@ typedef struct _filedec_readbuf
   uint16_t     write_curpos; 
   FSIZE_t      write_progress;
   FSIZE_t      write_total;
-  CTR<AES256> *write_cipher;
-  BLAKE2s     *write_mac;
+  CTR<AES256>  *write_cipher;
+  BLAKE2s      *inner_mac;
+  BLAKE2s      *outer_mac;
   fileenc_total_header fth;
 } filedec_state;
 
@@ -271,8 +277,8 @@ int filedec_base64_writedata(int c, void *v)
   if ((fw->write_curpos == FILEDEC_WRITEBUF_SIZE) || (c < 0))
   {
     UINT br;
+    fw->inner_mac->update(fw->write_buf, fw->write_curpos);
     fw->write_cipher->decrypt(fw->write_buf, fw->write_buf, fw->write_curpos);
-    fw->write_mac->update(fw->write_buf, fw->write_curpos);
     f_write(&fw->write_file,fw->write_buf,fw->write_curpos,&br);
     fw->write_curpos = 0;
     if ((f_tell(&fw->write_file)-fw->write_progress) >= FILEENC_DISPLAY_INCREMENT)
@@ -290,7 +296,7 @@ int filedec_base64_writedata(int c, void *v)
 
 void fileenc_decrypt_state(filedec_state *fs)
 {
-  uint8_t destroy_output = 1;
+  FSIZE_t destroy_output = 0;
   if (!fileenc_check_key_selected()) return;
   {
     char filename_ciphertext[256];
@@ -318,20 +324,27 @@ void fileenc_decrypt_state(filedec_state *fs)
   {
     uint8_t secret[KEYMANAGER_MAX_SECRET_LEN];
     uint8_t hash[KEYMANAGER_MAX_SECRET_LEN];
-    uint8_t mac[KEYMANAGER_HASHLEN];
+    hmac_inner_outer hic;
     int secretlen;
     if (keymanager_compute_secret(secret, &secretlen))
     {
+      CTR<AES256>  write_cipher;
+      BLAKE2s      inner_mac;
+      BLAKE2s      outer_mac;
+
       memset((void *)&fs->fth,'\000',sizeof(fs->fth));
+      fs->write_cipher = &write_cipher;
+      fs->inner_mac = &inner_mac;
+      fs->outer_mac = &outer_mac;
       if(file_read_block(&fs->read_file, "PARANOIABOX-FILEHEADER", (void *)&fs->fth, sizeof(fs->fth)))
       {
          fileenc_hash_derived_key((void *)hash, (void *)secret, secretlen, (void *)fs->fth.salt1, sizeof(fs->fth.salt1));
-         aes256_memcrypt(0, (void *)hash, (void *)fs->fth.iv1, (void *)&fs->fth.fhpu, sizeof(fs->fth.fhpu));
-         uint16_t extracted_crc16 = fs->fth.fhpu.fhp.crc16;
-         fs->fth.fhpu.fhp.crc16 = 0;
-         uint16_t calculated_crc16 = calc_crc16((uint8_t *)&fs->fth.fhpu.fhp, sizeof(fs->fth.fhpu.fhp));
-         if (extracted_crc16 == calculated_crc16)
+         hmac_compute_keys(*fs->inner_mac, *fs->outer_mac, (const uint8_t *)hash);      
+         fs->inner_mac->update((const uint8_t *) &fs->fth.fhpu, sizeof(fs->fth.fhpu));
+         hmac_compute_inner_outer_hash(*fs->inner_mac, *fs->outer_mac, &hic);
+         if (memcmp(&hic, &fs->fth.hmac_first_block, sizeof(hic)) == 0)
          {  
+           aes256_memcrypt(0, (void *)hash, (void *)fs->fth.iv1, (void *)&fs->fth.fhpu, sizeof(fs->fth.fhpu));
            if ((fs->fth.fhpu.fhp.id == FILEENC_EXPORT_ID) && (fs->fth.fhpu.fhp.vers == FILEENC_EXPORT_VERSION) &&
                (fs->fth.fhpu.fhp.len == sizeof(fs->fth.fhpu.fhp)) && (fs->fth.fhpu.fhp.entry_type == current_key_private.entry_type))
            {
@@ -339,43 +352,39 @@ void fileenc_decrypt_state(filedec_state *fs)
               fileenc_hash_derived_key((void *)hash, (void *)secret, secretlen, (void *)fs->fth.salt2, sizeof(fs->fth.salt2));
               if (file_skip_header(&fs->read_file,"PARANOIABOX-PAYLOAD",0))
               {
-                CTR<AES256> cipher;
-                BLAKE2s blake2s;
-                fs->write_cipher = &cipher;
-                fs->write_mac = &blake2s;
                 fs->read_filled = fs->read_curpos = 0;
                 fs->write_curpos = 0;
                 fs->write_progress = 0;
                 fs->write_total = fs->fth.fhpu.fhp.file_length;
-                cipher.setKey((const uint8_t *)hash, cipher.keySize());
-                cipher.setIV((const uint8_t *)fs->fth.iv2, cipher.ivSize());
-                blake2s.reset((const uint8_t *)hash, sizeof(hash));
+                fs->write_cipher->setKey((const uint8_t *)hash, fs->write_cipher->keySize());
+                fs->write_cipher->setIV((const uint8_t *)fs->fth.iv2, fs->write_cipher->ivSize());
+                hmac_compute_keys(*fs->inner_mac, *fs->outer_mac, (const uint8_t *)hash);      
                 base64_decode(filedec_base64_readdata,(void *)fs,  filedec_base64_writedata, (void *)fs);
                 filedec_base64_writedata(-1, (void *)fs); 
-                blake2s.finalize(mac, sizeof(mac));
-                if (file_skip_header(&fs->read_file,"PARANOIABOX-PAYLOAD",1))
+                hmac_compute_inner_outer_hash(*fs->inner_mac, *fs->outer_mac, &hic);
+                if (f_tell(&fs->write_file) == fs->fth.fhpu.fhp.file_length)
                 {
-                  uint8_t macverify[KEYMANAGER_HASHLEN];
-                  if(file_read_block(&fs->read_file, "PARANOIABOX-ENDBLOCK", (void *)&macverify, sizeof(macverify)))
-                  { 
-                     if (!memcmp((void *)mac,(void *)macverify,sizeof(mac)))
-                     {
-                       destroy_output = 0;
-                     }
-                     else file_report_error("MAC does not match!");
-                  } else file_report_error("End block not found");
-                } else file_report_error("End of payload not found");                
+                  if (file_skip_header(&fs->read_file,"PARANOIABOX-PAYLOAD",1))
+                  {
+                    hmac_inner_outer hicverify;
+                    if(file_read_block(&fs->read_file, "PARANOIABOX-ENDBLOCK", (void *)&hicverify, sizeof(hicverify)))
+                    { 
+                      if (memcmp((void *)&hic,(void *)&hicverify,sizeof(hic)) == 0)
+                      {
+                         destroy_output = fs->fth.fhpu.fhp.file_length;
+                      }
+                      else file_report_error("Payload HMAC is invalid");
+                    } else file_report_error("End block not found");
+                  } else file_report_error("End of payload not found");                
+                } else file_report_error("Payload length does not match header");
               } else file_report_error("No payload found");
            } else file_report_error("Wrong version of header");
-         } else file_report_error("CRC error in header");
+         } else file_report_error("Header HMAC is invalid");
       } else file_report_error("Could not read file header");
     }  else file_report_error("Bad secret key");
   }
-  if (destroy_output)
-  {
-    f_lseek(&fs->write_file,0);
-    f_truncate(&fs->write_file);
-  } 
+  f_lseek(&fs->write_file,destroy_output);
+  f_truncate(&fs->write_file);
   f_close(&fs->write_file);
   f_close(&fs->read_file);
 }
@@ -387,8 +396,6 @@ void fileenc_decrypt(void)
   fileenc_decrypt_state(fs);
   free(fs);
 }
-
-
 
 #ifdef __cplusplus
 }

@@ -128,18 +128,22 @@ void keymanager_recalculate_hashes(void)
   uint8_t keh[KEYMANAGER_HASHLEN];
   uint8_t bits[64];
 
+  BLAKE2s inner_mac, outer_mac;
   randomness_get_whitened_bits(bits, sizeof(bits));
   memcpy((void *)ks->key_entry_iv, (void *)bits, sizeof(ks->key_entry_iv));
 
-  ctblake2s((void *)keh, KEYMANAGER_HASHLEN, (void *) &ks->ke.keu, sizeof(ks->ke.keu), NULL, 0);
-  memcpy((void *)&ks->ke.hash, (void *)keh, KEYMANAGER_HASHLEN);
+  aes256_memcrypt(1, (void *)passphrase_hash, (void *)ks->key_entry_iv, (void *)&ks->keu, sizeof(ks->keu));
 
-  aes256_memcrypt(1, (void *)passphrase_hash, (void *)ks->key_entry_iv, (void *)&ks->ke, sizeof(ks->ke));
+  hmac_compute_keys(inner_mac, outer_mac, (const uint8_t *)passphrase_hash);
+  inner_mac.update((const uint8_t *) &ks->keu, sizeof(ks->keu));
+  hmac_compute_inner_outer_hash(inner_mac, outer_mac, &ks->hic);  
 }
 
 int keymanager_get_passphrase(void)
 {
   uint8_t keh[KEYMANAGER_HASHLEN];
+  BLAKE2s inner_mac, outer_mac;
+  hmac_inner_outer hic;
 
   if (!active_key)
   {
@@ -148,10 +152,11 @@ int keymanager_get_passphrase(void)
     keymanager_key_derivation_function(passphrase, passphrase_hash);
   }
 
-  aes256_memcrypt(0, (void *)passphrase_hash, (void *)ks->key_entry_iv, (void *)&ks->ke, sizeof(ks->ke));  
-  ctblake2s((void *)keh, KEYMANAGER_HASHLEN, (void *) &ks->ke.keu, sizeof(ks->ke.keu), NULL, 0);
+  hmac_compute_keys(inner_mac, outer_mac, (const uint8_t *)passphrase_hash);
+  inner_mac.update((const uint8_t *) &ks->keu, sizeof(ks->keu));
+  hmac_compute_inner_outer_hash(inner_mac, outer_mac, &hic);  
 
-  if (memcmp((void *)keh, (void *)&ks->ke.hash, KEYMANAGER_HASHLEN))
+  if (memcmp((void *)&hic, (void *)&ks->hic, sizeof(hic)))
   {
     char destructcode[13];
     console_gotoxy(1, 15);
@@ -159,7 +164,9 @@ int keymanager_get_passphrase(void)
     console_getstring(destructcode, sizeof(destructcode) - 1, 20, 1, 20);
     if ((strcmp(destructcode, "000DESTRUCT0")) || (!keymanager_initialize_database())) return 0;
     keyflash_changed = 1;
+    return 1;
   }
+  aes256_memcrypt(0, (void *)passphrase_hash, (void *)ks->key_entry_iv, (void *)&ks->keu, sizeof(ks->keu));  
   active_key = 1;
   return 1;
 }
@@ -312,8 +319,6 @@ void keymanager_new_passphrase_key(int entno, key_entry *ke)
   keyflash_changed = 1;
 }
 
-
-
 void keymanager_select_key(void)
 {
   int key_no = 0;
@@ -331,7 +336,7 @@ void keymanager_select_key(void)
     for (n=0;n<KEYMANAGER_SELECT_DISPLAY;n++)
     {
       int entno = n + top_key;
-      key_entry *ke = &ks->ke.keu.kes[entno];
+      key_entry *ke = &ks->keu.kes[entno];
       if (entno == key_no) console_highvideo();
       console_gotoxy(1,n+3);
       keymanager_display_key(entno,ke);
@@ -340,7 +345,7 @@ void keymanager_select_key(void)
     console_gotoxy(1,20);
     console_puts("Q-quits, K-invalidate passphrase\r\nUp/Down/Enter select key\r\nN-New Passphrase Key, P-New Private Key\r\nI-Import Public Key, E-Export Public Key");
     int ch = toupper(console_getch());
-    ke = &ks->ke.keu.kes[key_no];
+    ke = &ks->keu.kes[key_no];
     if (ch == 'Q') break;
     if (ch == 'K')
     {
@@ -407,7 +412,7 @@ void keymanager(void)
       keymanager_write_storage();
     }
   }
-  memset(ks, '\000', sizeof(key_entries));
+  memset(ks, '\000', sizeof(key_storage));
   free(ks);
   ks = NULL;
   if (invalidate_passphrase)

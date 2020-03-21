@@ -44,7 +44,6 @@ typedef struct _fileenc_header_payload
   uint16_t      totallen;
   uint64_t      file_length;
   char          filename[FILEENC_FILENAME];
-  uint16_t      crc16;
 } fileenc_header_payload;
 
 typedef union _fileenc_header_payload_union
@@ -59,12 +58,12 @@ typedef struct _fileenc_total_header
   uint8_t                         iv1[AES_BLOCKLEN];
   uint8_t                         salt2[KEYMANAGER_KEYBYTES];
   uint8_t                         iv2[AES_BLOCKLEN];
+  hmac_inner_outer                hmac_first_block;
   fileenc_header_payload_union    fhpu;
 } fileenc_total_header;
 
 void fileenc_encrypt(void);
 void fileenc_decrypt(void);
-int fileenc_compute_secret(uint8_t *secret, int &secretlen);
 
 #ifdef __cplusplus
 }

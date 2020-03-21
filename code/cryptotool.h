@@ -3,13 +3,15 @@
 
 #include <stdlib.h>
 #include <stdint.h>
-
+#include <BLAKE2s.h>
+#include <AES.h>
+#include <CTR.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-#define KEY_DERIVATION_HASHES 100
+#define KEY_DERIVATION_HASHES 1000
 #define KEY_MAX_PASSPHRASE_LENGTH 256
 #define KEYMANAGER_HASHLEN 32
 #define KEYMANAGER_KEYBYTES 32
@@ -37,10 +39,19 @@ int aes256_memcrypt(bool encrypt, void *aes_key, void *aes_iv, void *buffer, siz
 int key_derivation_function(void *hash, void *passphrase, size_t passphrase_len, void *salt, size_t salt_len);
 uint32_t calc_crc16(uint8_t *addr, uint32_t num);
 
+typedef struct _hmac_inner_outer
+{
+  uint8_t inner_mac[KEYMANAGER_HASHLEN];
+  uint8_t outer_mac[KEYMANAGER_HASHLEN];
+} hmac_inner_outer;
+
 int heap_stack_distance();
 
 #ifdef __cplusplus
 }
+
+int hmac_compute_keys(BLAKE2s &inner_mac, BLAKE2s &outer_mac, const uint8_t *derived_key);
+int hmac_compute_inner_outer_hash(BLAKE2s &inner_mac, BLAKE2s &outer_mac, hmac_inner_outer *hic);
 #endif
 
 #endif  /* _CRYPTOTOOL_H */

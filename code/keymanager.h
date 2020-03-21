@@ -90,17 +90,12 @@ typedef union _key_entry_union
 	uint8_t   filler[PAD_UP_TO_AES_BLOCKLEN(sizeof(key_entry)*KEY_NUMBER)];        /* 64 bytes = 4 AES blocks */
 } key_entry_union;
 
-typedef struct _key_entries
-{
-	key_entry_union keu;
-	uint8_t         hash[KEYMANAGER_HASHLEN];
-} key_entries;
-
 typedef struct _key_storage
 {
-	uint8_t         salt[KEYMANAGER_KEYBYTES];
-  uint8_t         key_entry_iv[AES_BLOCKLEN];
-	key_entries     ke;
+	uint8_t          salt[KEYMANAGER_KEYBYTES];
+  uint8_t          key_entry_iv[AES_BLOCKLEN];
+  hmac_inner_outer hic;
+	key_entry_union  keu;
 } key_storage;
 
 void keymanager(void);

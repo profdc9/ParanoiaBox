@@ -6,7 +6,7 @@
 #include <AES.h>
 #include <CTR.h>
 #include "cryptotool.h"
-
+#include "consoleio.h"
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -122,15 +122,24 @@ int ctblake2s( void *out, size_t outlen, const void *in, size_t inlen, const voi
 	return 0;
 }
 
+/* PBKDF2 for 32 bits output */
 int key_derivation_function(void *hash, void *passphrase, size_t passphrase_len, void *salt, size_t salt_len)
 {
-	int n;
-	uint8_t new_salt[KEYMANAGER_HASHLEN];
-	ctblake2s(hash, KEYMANAGER_HASHLEN, passphrase, passphrase_len, salt, salt_len);
-	for (n=0;n<KEY_DERIVATION_HASHES;n++)
+	for (int i=0;i<KEYMANAGER_HASHLEN;i++) ((uint8_t *)hash)[i] = 0;
+	for (uint32_t n=0;n<KEY_DERIVATION_HASHES;n++)
 	{
-		memcpy((void *)new_salt, hash, sizeof(new_salt));
-		ctblake2s(hash, KEYMANAGER_HASHLEN, (void *)passphrase, passphrase_len, new_salt, sizeof(new_salt));
+    BLAKE2s blake2s;
+    uint8_t b[4];
+    uint8_t current_hash[KEYMANAGER_HASHLEN];
+    b[0] = (n >> 24) & 0xFF;
+    b[1] = (n >> 16) & 0xFF;
+    b[2] = (n >> 8) & 0xFF;
+    b[3] = n & 0xFF;
+    blake2s.reset((uint8_t *)salt, salt_len, KEYMANAGER_HASHLEN);
+    blake2s.update(b, sizeof(b));
+    blake2s.update((uint8_t *)passphrase, passphrase_len);
+    blake2s.finalize(current_hash, KEYMANAGER_HASHLEN);
+    for (int i=0;i<KEYMANAGER_HASHLEN;i++) ((uint8_t *)hash)[i] ^= current_hash[i];
 	}
 	return 0;
 }
@@ -180,3 +189,22 @@ uint32_t calc_crc16(uint8_t *addr, uint32_t num)
 #ifdef __cplusplus
 }
 #endif
+
+int hmac_compute_keys(BLAKE2s &inner_mac, BLAKE2s &outer_mac, const uint8_t *derived_key)
+{
+  uint8_t key[KEYMANAGER_HASHLEN];
+  int i;
+  for (i=0;i<KEYMANAGER_HASHLEN;i++) key[i] = derived_key[i] ^ 0x5C;
+  inner_mac.reset(key, sizeof(key));
+  for (i=0;i<KEYMANAGER_HASHLEN;i++) key[i] = derived_key[i] ^ 0x36;
+  outer_mac.reset(key, sizeof(key));
+  return 1;
+}
+
+int hmac_compute_inner_outer_hash(BLAKE2s &inner_mac, BLAKE2s &outer_mac, hmac_inner_outer *hic)
+{
+  inner_mac.finalize(hic->inner_mac, KEYMANAGER_HASHLEN);
+  outer_mac.update(hic->inner_mac, KEYMANAGER_HASHLEN);
+  outer_mac.finalize(hic->outer_mac, KEYMANAGER_HASHLEN);
+  return 1;
+}   
