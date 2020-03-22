@@ -71,7 +71,6 @@ int random_circuit_check(void)
 
 void randomness_get_whitened_bits(uint8_t whitenedbytes[], size_t bytes)
 {
-	bytes = (bytes+31) & ~0x1F;
 	for (int b=0;b<bytes;b+=32)
 	{
     uint8_t predigest[KEYMANAGER_HASHLEN*8];   

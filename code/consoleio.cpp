@@ -213,6 +213,20 @@ int console_yes(int row)
   return strcmp(response,"YES");
 }
 
+void console_print_array(const char *c, unsigned char *a, int n)
+{
+  console_printcrlf();
+  console_puts(c);
+  for (int i=0;i<n;i++)
+  {
+    if ((i % 8) == 0)
+        console_printcrlf();
+    console_printint(a[i]);
+    console_puts(" ");
+  }
+  console_printcrlf();
+}
+
 
 char *strcpy_n(char *dest, const char *src, size_t len)
 {
