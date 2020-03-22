@@ -126,18 +126,19 @@ int ctblake2s( void *out, size_t outlen, const void *in, size_t inlen, const voi
 /* PBKDF2 for 32 bits output */
 int key_derivation_function(void *hash, void *passphrase, size_t passphrase_len, void *salt, size_t salt_len)
 {
-	for (int i=0;i<KEYMANAGER_HASHLEN;i++) ((uint8_t *)hash)[i] = 0;
-	for (uint32_t n=0;n<KEY_DERIVATION_HASHES;n++)
+  BLAKE2s blake2s;
+  const uint8_t b[4] = { 0, 0, 0, 1 };
+  uint8_t current_hash[KEYMANAGER_HASHLEN];
+ 
+  blake2s.reset((uint8_t *)salt, salt_len, KEYMANAGER_HASHLEN);
+  blake2s.update(b, sizeof(b));
+  blake2s.update((uint8_t *)passphrase, passphrase_len);
+  blake2s.finalize(hash, KEYMANAGER_HASHLEN);
+  memcpy((void *)current_hash, (void *)hash, KEYMANAGER_HASHLEN);
+    
+	for (uint32_t n=1;n<KEY_DERIVATION_HASHES;n++)
 	{
-    BLAKE2s blake2s;
-    uint8_t b[4];
-    uint8_t current_hash[KEYMANAGER_HASHLEN];
-    b[0] = (n >> 24) & 0xFF;
-    b[1] = (n >> 16) & 0xFF;
-    b[2] = (n >> 8) & 0xFF;
-    b[3] = n & 0xFF;
-    blake2s.reset((uint8_t *)salt, salt_len, KEYMANAGER_HASHLEN);
-    blake2s.update(b, sizeof(b));
+    blake2s.reset((uint8_t *)current_hash, KEYMANAGER_HASHLEN);
     blake2s.update((uint8_t *)passphrase, passphrase_len);
     blake2s.finalize(current_hash, KEYMANAGER_HASHLEN);
     for (int i=0;i<KEYMANAGER_HASHLEN;i++) ((uint8_t *)hash)[i] ^= current_hash[i];
