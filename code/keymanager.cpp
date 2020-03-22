@@ -21,6 +21,7 @@
 #include "Arduino.h"
 #include <stdarg.h>
 #include <ff.h>
+#include <RNG.h>
 #include <Curve25519.h>
 #include "consoleio.h"
 #include "editor.h"
@@ -196,7 +197,8 @@ void keymanager_new_private_key(int entno, key_entry *ke)
   
   char description[KEY_DESCRIPTION_LEN];
   if (keymanager_erase_this_key("Generate new private/public key", entno, ke, description, sizeof(description)-1)) return;
-  
+
+  random_stir_in_entropy();
   Curve25519::dh1(public_key, private_key);
   memset((void *)&ke->ksu,'\000',sizeof(ke->ksu));
   memcpy((void *)ke->description,(void *)description,sizeof(ke->description));

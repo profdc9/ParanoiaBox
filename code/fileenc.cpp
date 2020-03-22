@@ -158,15 +158,21 @@ void fileenc_encrypt_state(fileenc_state *fs)
   {
     uint8_t secret[KEYMANAGER_MAX_SECRET_LEN];
     uint8_t tag[AES_GCM_TAG_LENGTH];
-    uint8_t iv2[AES_BLOCKLEN];
     int secretlen;
     if (keymanager_compute_secret(secret, &secretlen))
     {
       GCM<AES256> read_cipher;
+      uint8_t salt2[KEYMANAGER_HASHLEN];
+      uint8_t iv2[AES_BLOCKLEN];
+      uint8_t aes_key1[AES_KEYLEN];
+      uint8_t aes_key2[AES_KEYLEN];
 
       memset((void *)&fs->fth,'\000',sizeof(fs->fth));
       randomness_get_whitened_bits(fs->fth.iv1, sizeof(fs->fth.iv1));
+      randomness_get_whitened_bits(fs->fth.salt1, sizeof(fs->fth.salt1));
+      randomness_get_whitened_bits(salt2, sizeof(salt2));
       randomness_get_whitened_bits(iv2, sizeof(iv2));
+      key_derivation_function((void *)aes_key1, secret, secretlen, fs->fth.salt1, sizeof(fs->fth.salt1));
       
       fs->fth.fhpu.fhp.id   =         FILEENC_EXPORT_ID;
       fs->fth.fhpu.fhp.entry_type =   current_key_private.entry_type;
@@ -174,9 +180,10 @@ void fileenc_encrypt_state(fileenc_state *fs)
       fs->fth.fhpu.fhp.len =          sizeof(fs->fth.fhpu.fhp);
       fs->fth.fhpu.fhp.totallen =     sizeof(fs->fth.fhpu);
       fs->fth.fhpu.fhp.file_length =  f_size(&fs->read_file);
+      memcpy((void *)fs->fth.fhpu.fhp.salt2, (void *)salt2, sizeof(fs->fth.fhpu.fhp.salt2));
       memcpy((void *)fs->fth.fhpu.fhp.iv2, (void *)iv2, sizeof(fs->fth.fhpu.fhp.iv2));
       strcpy_n(fs->fth.fhpu.fhp.filename, fileenc_filename(filename_plaintext), sizeof(fs->fth.fhpu.fhp.filename)-1);
-      aes256_gcm_memcrypt(1, (void *)secret, (void *)fs->fth.iv1, (void *)&fs->fth.tag1, (void *)&fs->fth.fhpu, sizeof(fs->fth.fhpu));
+      aes256_gcm_memcrypt(1, (void *)aes_key1, (void *)fs->fth.iv1, (void *)fs->fth.tag1, (void *)&fs->fth.fhpu, sizeof(fs->fth.fhpu));
       file_write_block(&fs->write_file, "PARANOIABOX-FILEHEADER", (void *)&fs->fth, sizeof(fs->fth));
 
       file_write_header(&fs->write_file,"PARANOIABOX-PAYLOAD",0);
@@ -184,14 +191,15 @@ void fileenc_encrypt_state(fileenc_state *fs)
       fs->read_filled = fs->read_curpos = 0;
       fs->write_curpos = 0;
       fs->read_progress = 0;
-      fs->read_cipher->setKey((const uint8_t *)secret, fs->read_cipher->keySize());
+      key_derivation_function((void *)aes_key2, secret, secretlen, salt2, sizeof(salt2));
+      fs->read_cipher->setKey((const uint8_t *)aes_key2, fs->read_cipher->keySize());
       fs->read_cipher->setIV((const uint8_t *)iv2, fs->read_cipher->ivSize());
       base64_encode(fileenc_base64_readdata,(void *)fs,  fileenc_base64_writedata, (void *)fs);
       fileenc_base64_writedata(-1, (void *)fs); 
       fs->read_cipher->computeTag((uint8_t *)tag, AES_GCM_TAG_LENGTH);
       file_write_header(&fs->write_file,"PARANOIABOX-PAYLOAD",1);
       
-      file_write_block(&fs->write_file, "PARANOIABOX-ENDBLOCK", (void *)&tag, sizeof(tag));      
+      file_write_block(&fs->write_file, "PARANOIABOX-ENDBLOCK", (void *)tag, sizeof(tag));      
     } else file_report_error("Bad secret key");
   }  
   f_close(&fs->write_file);
@@ -312,10 +320,13 @@ void fileenc_decrypt_state(filedec_state *fs)
     if (keymanager_compute_secret(secret, &secretlen))
     {
       memset((void *)&fs->fth,'\000',sizeof(fs->fth));
+      
       if(file_read_block(&fs->read_file, "PARANOIABOX-FILEHEADER", (void *)&fs->fth, sizeof(fs->fth)))
       {
         
-        if (aes256_gcm_memcrypt(0, (void *)secret, (void *)fs->fth.iv1, (void *)fs->fth.tag1, (void *)&fs->fth.fhpu, sizeof(fs->fth.fhpu)))
+        uint8_t aes_key1[AES_KEYLEN];
+        key_derivation_function((void *)aes_key1, secret, secretlen, fs->fth.salt1, sizeof(fs->fth.salt1));
+        if (aes256_gcm_memcrypt(0, (void *)aes_key1, (void *)fs->fth.iv1, (void *)fs->fth.tag1, (void *)&fs->fth.fhpu, sizeof(fs->fth.fhpu)))
         {
            if ((fs->fth.fhpu.fhp.id == FILEENC_EXPORT_ID) && (fs->fth.fhpu.fhp.vers == FILEENC_EXPORT_VERSION) &&
                (fs->fth.fhpu.fhp.len == sizeof(fs->fth.fhpu.fhp)) && (fs->fth.fhpu.fhp.entry_type == current_key_private.entry_type))
@@ -324,13 +335,15 @@ void fileenc_decrypt_state(filedec_state *fs)
               if (file_skip_header(&fs->read_file,"PARANOIABOX-PAYLOAD",0))
               {
                 GCM<AES256>  write_cipher;
+                uint8_t aes_key2[AES_KEYLEN];
+                key_derivation_function((void *)aes_key2, secret, secretlen, fs->fth.fhpu.fhp.salt2, sizeof(fs->fth.fhpu.fhp.salt2));
                 fs->write_cipher = &write_cipher;
                 fs->read_filled = fs->read_curpos = 0;
                 fs->read_abort = 0;
                 fs->write_curpos = 0;
                 fs->write_progress = 0;
                 fs->write_total = fs->fth.fhpu.fhp.file_length;
-                fs->write_cipher->setKey((const uint8_t *)secret, fs->write_cipher->keySize());
+                fs->write_cipher->setKey((const uint8_t *)aes_key2, fs->write_cipher->keySize());
                 fs->write_cipher->setIV((const uint8_t *)fs->fth.fhpu.fhp.iv2, fs->write_cipher->ivSize());
                 base64_decode(filedec_base64_readdata,(void *)fs,  filedec_base64_writedata, (void *)fs);
                 filedec_base64_writedata(-1, (void *)fs); 
@@ -339,7 +352,7 @@ void fileenc_decrypt_state(filedec_state *fs)
                   if (file_skip_header(&fs->read_file,"PARANOIABOX-PAYLOAD",1))
                   {
                     uint8_t tag[AES_GCM_TAG_LENGTH];
-                    if(file_read_block(&fs->read_file, "PARANOIABOX-ENDBLOCK", (void *)&tag, sizeof(tag)))
+                    if(file_read_block(&fs->read_file, "PARANOIABOX-ENDBLOCK", (void *)tag, sizeof(tag)))
                     { 
                       if (fs->write_cipher->checkTag(tag, AES_GCM_TAG_LENGTH))
                       {
@@ -353,7 +366,7 @@ void fileenc_decrypt_state(filedec_state *fs)
            } else file_report_error("Wrong version of header");
         } else file_report_error("Header Tag is invalid");
       } else file_report_error("Could not read file header");
-    }  else file_report_error("Bad secret key");
+    } else file_report_error("Bad secret key");
   }
   f_lseek(&fs->write_file,destroy_output);
   f_truncate(&fs->write_file);

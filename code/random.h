@@ -25,12 +25,15 @@ freely, subject to the following restrictions:
 extern "C" {
 #endif
 
+#define RNG_APP_TAG "ParanoiaBox"
+
 void random_initialize(void);
 void randomness_test(void);
 void randomness_show(void);
 int random_circuit_check(void);
 void randomness_get_raw_random_bits(uint8_t randomdata[], int bytes);
 void randomness_get_whitened_bits(uint8_t whitenedbytes[], size_t bytes);
+void random_stir_in_entropy(void);
 
 #ifdef __cplusplus
 }

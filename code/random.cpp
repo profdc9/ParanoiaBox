@@ -20,6 +20,8 @@ freely, subject to the following restrictions:
 
 #include <stdarg.h>
 #include <Arduino.h>
+#include <RNG.h>
+#include "SimpleTransistorNoiseSource.h"
 #include "debugmsg.h"
 #include "consoleio.h"
 #include "random.h"
@@ -33,6 +35,8 @@ freely, subject to the following restrictions:
 #ifdef USE_MINIPRINTF
 #include "mini-printf.h"
 #endif
+
+SimpleTransistorNoiseSource noise;
 
 #ifdef __cplusplus
 extern "C" {
@@ -63,12 +67,22 @@ void random_initialize(void)
 	adc_set_reg_seqlen(ADC1, 1);
 	adc_set_sample_rate(ADC2, ADC_SMPR_1_5);
 	adc_set_reg_seqlen(ADC2, 1);
+
+  RNG.begin(RNG_APP_TAG);
+  RNG.addNoiseSource(noise);
+}
+
+void random_stir_in_entropy(void)
+{
+  while (!RNG.available(32))
+    RNG.loop();
 }
 
 int random_circuit_check(void)
 {
 }
 
+/*
 void randomness_get_whitened_bits(uint8_t whitenedbytes[], size_t bytes)
 {
 	for (int b=0;b<bytes;b+=32)
@@ -81,6 +95,20 @@ void randomness_get_whitened_bits(uint8_t whitenedbytes[], size_t bytes)
        (void *)predigest, sizeof(predigest), NULL,0);
 	}
 }
+*/
+
+void randomness_get_whitened_bits(uint8_t whitenedbytes[], size_t bytes)
+{
+  for (int b=0;b<bytes;b+=32)
+  {
+    int get_bytes = bytes - b;
+    get_bytes =  get_bytes > 32 ? 32 : get_bytes;
+    while (!RNG.available(32))
+      RNG.loop();
+    RNG.rand(&whitenedbytes[b], get_bytes);
+  }
+}
+
 
 #define NUMBER_BLOCK 400
 
@@ -98,8 +126,8 @@ void randomness_test(void)
 	for (int n=0;n<NUMBER_BLOCK;n++)
 	{
 		uint8_t randbits[32];
-		randomness_get_raw_random_bits(randbits, sizeof(randbits));
-//	    randomness_get_whitened_bits(randbits, sizeof(randbits));
+//		randomness_get_raw_random_bits(randbits, sizeof(randbits));
+	    randomness_get_whitened_bits(randbits, sizeof(randbits));
 	    for (int j=0;j<sizeof(randbits);j++)
 			histogram[randbits[j] & 0x1F]++;
 	}
