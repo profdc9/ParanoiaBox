@@ -199,14 +199,6 @@ bool Curve25519::eval(uint8_t result[32], const uint8_t s[32], const uint8_t x[3
     return retval;
 }
 
-#define RANDOMHACK
-#ifdef RANDOMHACK
-extern "C"
-{
-  void randomness_get_whitened_bits(uint8_t whitenedbytes[], size_t bytes);
-}
-#endif
-
 /**
  * \brief Performs phase 1 of a Diffie-Hellman key exchange using Curve25519.
  *
@@ -257,11 +249,7 @@ void Curve25519::dh1(uint8_t k[32], uint8_t f[32])
         // it valid as an "s" value for eval().  According to the specification
         // we need to mask off the 3 right-most bits of f[0], mask off the
         // left-most bit of f[31], and set the second to left-most bit of f[31].
-#ifdef RANDOMHACK
-		randomness_get_whitened_bits(f, 32);
-#else
         RNG.rand(f, 32);
-#endif
         f[0] &= 0xF8;
         f[31] = (f[31] & 0x7F) | 0x40;
 
