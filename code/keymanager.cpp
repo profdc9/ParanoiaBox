@@ -128,22 +128,14 @@ void keymanager_recalculate_hashes(void)
   uint8_t keh[KEYMANAGER_HASHLEN];
   uint8_t bits[64];
 
-  BLAKE2s inner_mac, outer_mac;
   randomness_get_whitened_bits(bits, sizeof(bits));
   memcpy((void *)ks->key_entry_iv, (void *)bits, sizeof(ks->key_entry_iv));
-
-  aes256_memcrypt(1, (void *)passphrase_hash, (void *)ks->key_entry_iv, (void *)&ks->keu, sizeof(ks->keu));
-
-  hmac_compute_keys(inner_mac, outer_mac, (const uint8_t *)passphrase_hash);
-  inner_mac.update((const uint8_t *) &ks->keu, sizeof(ks->keu));
-  hmac_compute_inner_outer_hash(inner_mac, outer_mac, &ks->hic);  
+  aes256_gcm_memcrypt(1, (void *)passphrase_hash, (void *)ks->key_entry_iv, (void *)ks->key_entry_tag, (void *)&ks->keu, sizeof(ks->keu));
 }
 
 int keymanager_get_passphrase(void)
 {
   uint8_t keh[KEYMANAGER_HASHLEN];
-  BLAKE2s inner_mac, outer_mac;
-  hmac_inner_outer hic;
 
   if (!active_key)
   {
@@ -151,12 +143,7 @@ int keymanager_get_passphrase(void)
     keymanager_enter_passphrase("Enter passphrase:", passphrase);
     keymanager_key_derivation_function(passphrase, passphrase_hash);
   }
-
-  hmac_compute_keys(inner_mac, outer_mac, (const uint8_t *)passphrase_hash);
-  inner_mac.update((const uint8_t *) &ks->keu, sizeof(ks->keu));
-  hmac_compute_inner_outer_hash(inner_mac, outer_mac, &hic);  
-
-  if (memcmp((void *)&hic, (void *)&ks->hic, sizeof(hic)))
+  if (!aes256_gcm_memcrypt(0, (void *)passphrase_hash, (void *)ks->key_entry_iv, (void *)ks->key_entry_tag, (void *)&ks->keu, sizeof(ks->keu)))
   {
     char destructcode[13];
     console_gotoxy(1, 15);
@@ -166,7 +153,6 @@ int keymanager_get_passphrase(void)
     keyflash_changed = 1;
     return 1;
   }
-  aes256_memcrypt(0, (void *)passphrase_hash, (void *)ks->key_entry_iv, (void *)&ks->keu, sizeof(ks->keu));  
   active_key = 1;
   return 1;
 }

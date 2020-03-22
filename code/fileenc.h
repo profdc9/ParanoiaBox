@@ -54,11 +54,9 @@ typedef union _fileenc_header_payload_union
 
 typedef struct _fileenc_total_header
 {
-  uint8_t                         salt1[KEYMANAGER_KEYBYTES];
   uint8_t                         iv1[AES_BLOCKLEN];
-  uint8_t                         salt2[KEYMANAGER_KEYBYTES];
   uint8_t                         iv2[AES_BLOCKLEN];
-  hmac_inner_outer                hmac_first_block;
+  uint8_t                         tag1[AES_BLOCKLEN];
   fileenc_header_payload_union    fhpu;
 } fileenc_total_header;
 

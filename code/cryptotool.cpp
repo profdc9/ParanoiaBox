@@ -5,6 +5,7 @@
 #include <BLAKE2s.h>
 #include <AES.h>
 #include <CTR.h>
+#include <GCM.h>
 #include "cryptotool.h"
 #include "consoleio.h"
 #ifdef __cplusplus
@@ -144,16 +145,19 @@ int key_derivation_function(void *hash, void *passphrase, size_t passphrase_len,
 	return 0;
 }
 
-int aes256_memcrypt(bool encrypt, void *aes_key, void *aes_iv, void *buffer, size_t inlen)
+int aes256_gcm_memcrypt(bool encrypt, void *aes_key, void *aes_iv, void *tag, void *buffer, size_t inlen)
 {
-	CTR<AES256> cipher;
-    cipher.setKey((const uint8_t *)aes_key, cipher.keySize());
-    cipher.setIV((const uint8_t *)aes_iv, cipher.ivSize());
-	if (encrypt)
-	    cipher.encrypt((uint8_t *)buffer,(uint8_t *)buffer, inlen);
-	else
-	    cipher.decrypt((uint8_t *)buffer,(uint8_t *)buffer, inlen);
-	return 0;
+  GCM<AES256> cipher;
+  cipher.setKey((const uint8_t *)aes_key, cipher.keySize());
+  cipher.setIV((const uint8_t *)aes_iv, cipher.ivSize());
+  if (encrypt)
+  {
+      cipher.encrypt((uint8_t *)buffer,(uint8_t *)buffer, inlen);
+      cipher.computeTag((uint8_t *)tag, AES_GCM_TAG_LENGTH);
+      return 1;
+  }
+  cipher.decrypt((uint8_t *)buffer,(uint8_t *)buffer, inlen);
+  return cipher.checkTag(tag, AES_GCM_TAG_LENGTH);
 }
 
 void * __builtin_return_address (unsigned int level);
@@ -190,6 +194,7 @@ uint32_t calc_crc16(uint8_t *addr, uint32_t num)
 }
 #endif
 
+#if 0
 int hmac_compute_keys(BLAKE2s &inner_mac, BLAKE2s &outer_mac, const uint8_t *derived_key)
 {
   uint8_t key[KEYMANAGER_HASHLEN];
@@ -207,4 +212,5 @@ int hmac_compute_inner_outer_hash(BLAKE2s &inner_mac, BLAKE2s &outer_mac, hmac_i
   outer_mac.update(hic->inner_mac, KEYMANAGER_HASHLEN);
   outer_mac.finalize(hic->outer_mac, KEYMANAGER_HASHLEN);
   return 1;
-}   
+}
+#endif

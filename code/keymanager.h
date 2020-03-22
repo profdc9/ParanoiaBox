@@ -94,7 +94,7 @@ typedef struct _key_storage
 {
 	uint8_t          salt[KEYMANAGER_KEYBYTES];
   uint8_t          key_entry_iv[AES_BLOCKLEN];
-  hmac_inner_outer hic;
+  uint8_t          key_entry_tag[AES_BLOCKLEN];
 	key_entry_union  keu;
 } key_storage;
 

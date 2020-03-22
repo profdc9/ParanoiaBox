@@ -3,9 +3,8 @@
 
 #include <stdlib.h>
 #include <stdint.h>
-#include <BLAKE2s.h>
 #include <AES.h>
-#include <CTR.h>
+#include <GCM.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -19,6 +18,7 @@ extern "C" {
 #define KEYMANAGER_PRIVATEKEY_LEN 32
 #define AES_KEYLEN 32
 #define AES_BLOCKLEN 16
+#define AES_GCM_TAG_LENGTH 16
 #define KEYMANAGER_SYMMETRICKEY_LEN AES_KEYLEN
 #define KEYMANAGER_MAX_SECRET_LEN KEYMANAGER_PUBLICKEY_LEN
 
@@ -36,19 +36,21 @@ int is_base64_char(char ch);
 int ctblake2s( void *out, size_t outlen, const void *in, size_t inlen, const void *key, size_t keylen );
 int ctblake2srehash( void *hash, size_t inlen, int numhash);
 int aes256_memcrypt(bool encrypt, void *aes_key, void *aes_iv, void *buffer, size_t inlen);
+int aes256_gcm_memcrypt(bool encrypt, void *aes_key, void *aes_iv, void *tag, void *buffer, size_t inlen);
 int key_derivation_function(void *hash, void *passphrase, size_t passphrase_len, void *salt, size_t salt_len);
 uint32_t calc_crc16(uint8_t *addr, uint32_t num);
+int heap_stack_distance();
 
+#ifdef __cplusplus
+}
+#endif
+
+#if 0
 typedef struct _hmac_inner_outer
 {
   uint8_t inner_mac[KEYMANAGER_HASHLEN];
   uint8_t outer_mac[KEYMANAGER_HASHLEN];
 } hmac_inner_outer;
-
-int heap_stack_distance();
-
-#ifdef __cplusplus
-}
 
 int hmac_compute_keys(BLAKE2s &inner_mac, BLAKE2s &outer_mac, const uint8_t *derived_key);
 int hmac_compute_inner_outer_hash(BLAKE2s &inner_mac, BLAKE2s &outer_mac, hmac_inner_outer *hic);
