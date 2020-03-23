@@ -3,7 +3,7 @@ The ParanoiaBox by Daniel L. Marks
 
 The ParanoiaBox is a standalone open hardware/software encryption device based on the STM32F103CBT6 processor.  On this device, messages may be composed, encrypted, decrypted, and viewed.  The device is an experiment in encryption minimalism, presenting a minimal attack surface by using a small microcontroller rather than a full personal computer with a complex operating system, while providing the functionality needed to transact encrypted messages between humans through insecure networks.  The device is connected to a NTSC television and a PS/2 keyboard for user input and control.  There are two micro SD card slots, one for ciphertext and the other for plaintext used to transact files.  There is a hardware random number generator based on avalanche noise generated in two transistors.  A picture of the complete PCB of the device can be seen below:
 
-![x](images/pcb.jpg)
+![x](images/pcb2.jpg)
 
 At the top of the board is a RCA composite video connector.  At the right is a USB B connector that can be used to program the microcontroller.  At the lower right is a female PS/2 keyboard connector.  At the bottom are two SD card slots.  Finally, at the left is a barrel jack for 7 to 12 volt DC input power.  Except for the micro SD card slots, the PCB is all through assembly so it can be assembled more easily using simple tools.
 
@@ -19,16 +19,28 @@ The project uses the stm32duino libraries located here:
 
 https://github.com/rogerclarkmelbourne/Arduino_STM32
 
-All other Arduino libraries are provided in the libraries directory in this project, including those that provide the FAT fs, NTSC video output, PS/2 keyboard input, and cryptography, which is very slightly modified from the official one.  At present, only the Curve25519 class is modified to use a different random number source to generated keys.  Here are some screenshots directly of the TV screen.  This is the main menu:
+All other Arduino libraries are provided in the libraries directory in this project, including those that provide the FAT fs, NTSC video output, PS/2 keyboard input, and cryptography, which is very slightly modified from the official one.  At present, only the Curve25519 class is modified to use a different random number source to generated keys.  To enter a message into the microcontroller, there is a full-screen text editor:
 
-![x](images/screenshot1.jpg)
+![x](images/screenshot4.jpg)
 
-There is a the built-in full-screen editor used to compose short messages.  Files may be selected from the SD cards using an interface like this:
+There is a the built-in full-screen editor used to compose short messages.  Files may be selected from the SD cards for editing, encryption, or decryption:
 
-![x](images/screenshot2.jpg)
+![x](images/screenshot9.jpg)
 
 This is the key manager screen from which the AES 256 symmetric, ECDH25519 private or public keys are selected:
 
-![x](images/screenshot3.jpg)
+![x](images/screenshot5.jpg)
 
-To encrypt/decrypt using AES, a AES key is selected.  To encrypt/decrypt using ECDH25519, a private and public key pair are selected.  Then one selects a file to encrypt or decrypt.  Separate SD cards must be used for encryption and decryption to ensure that both are not available together to be compared.
+To encrypt/decrypt using AES, a AES key is selected.  To encrypt/decrypt using ECDH25519, a private and public key pair are selected.   Then one selects a file to encrypt or decrypt.  Separate SD cards must be used for encryption and decryption to ensure that both are not available together to be compared.  One can export a public key certificate from a private key.  After selection, the main screen shows the selected keys:
+
+![x](images/screenshot6.jpg)
+
+The message is then encrypted by selecting the file from the card in the plaintext slot using the (E)ncrypt option.  Then the encrypted file is placed on the card in the ciphertext slot.  You can view this file which is text encoded to be easily transmitted over email:
+
+![x](images/screenshot7.jpg)
+
+Once it has been received, it can be decrypted and viewed, and it looks like the original:
+
+![x](images/screenshot8.jpg)
+
+
