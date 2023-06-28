@@ -19,7 +19,7 @@ The project uses the stm32duino libraries located here:
 
 https://github.com/rogerclarkmelbourne/Arduino_STM32
 
-All other Arduino libraries are provided in the libraries directory in this project, including those that provide the FAT fs, NTSC video output, PS/2 keyboard input, and cryptography, which is very slightly modified from the official one.  At present, only the Curve25519 class is modified to use a different random number source to generated keys.  To enter a message into the microcontroller, there is a full-screen text editor:
+All other Arduino libraries are provided in the libraries directory in this project, including those that provide the FAT fs, NTSC video output, PS/2 keyboard input, and cryptography.  To enter a message into the microcontroller, there is a full-screen text editor:
 
 ![x](images/screenshot4.jpg)
 
